@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+
+# Necessary for vLLM engine.
+--extra-index-url https://flashinfer.ai/whl/cu121/torch2.4
+flashinfer
+ucx-py-cu12
+# TODO update to branch / fork
+vllm==0.6.6.post1
