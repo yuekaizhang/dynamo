@@ -16,7 +16,6 @@
 import asyncio
 import importlib
 import logging
-import multiprocessing
 import os
 import pathlib
 import signal
@@ -50,7 +49,7 @@ class WorkerConfig:
     data_plane: Type[DataPlane] = UcpDataPlane
     request_plane_args: tuple[list, dict] = field(default_factory=lambda: ([], {}))
     data_plane_args: tuple[list, dict] = field(default_factory=lambda: ([], {}))
-    log_level: int = 0
+    log_level: Optional[int] = None
     operators: list[OperatorConfig] = field(default_factory=list)
     triton_log_path: Optional[str] = None
     name: str = str(uuid.uuid1())
@@ -75,6 +74,8 @@ class Worker:
         self._triton_log_path = config.triton_log_path
         self._name = config.name
         self._log_level = config.log_level
+        if self._log_level is None:
+            self._log_level = 0
         self._operator_configs = config.operators
         self._log_dir = config.log_dir
 
@@ -87,6 +88,7 @@ class Worker:
         self._operators: dict[tuple[str, int], Operator] = {}
         self._metrics_port = config.metrics_port
         self._metrics_server: Optional[uvicorn.Server] = None
+        self._component_id = self._request_plane.component_id
 
     def _import_operators(self):
         for operator_config in self._operator_configs:
@@ -225,6 +227,7 @@ class Worker:
         await asyncio.gather(*handlers)
 
     async def serve(self):
+        error = None
         self._triton_core = tritonserver.Server(
             model_repository=".",
             log_error=True,
@@ -258,6 +261,7 @@ class Worker:
         except Exception as e:
             logger.exception("Encountered an error in worker: %s", e)
             self._stop_requested = True
+            error = e
         logger.info("worker store: %s", list(self._data_plane._tensor_store.keys()))
         logger.info("Worker stopped...")
         logger.info(
@@ -272,6 +276,7 @@ class Worker:
         if self._metrics_server:
             self._metrics_server.should_exit = True
             await self._metrics_server.shutdown()
+        return error
 
     async def shutdown(self, signal):
         logger.info("Received exit signal %s...", signal.name)
@@ -326,13 +331,20 @@ class Worker:
         loop.stop()
 
     def start(self):
+        exit_condition = None
+
         if self._log_dir:
+            pid = os.getpid()
             os.makedirs(self._log_dir, exist_ok=True)
-            stdout_path = os.path.join(self._log_dir, f"{self._name}.stdout.log")
-            stderr_path = os.path.join(self._log_dir, f"{self._name}.stderr.log")
+            stdout_path = os.path.join(
+                self._log_dir, f"{self._name}.{self._component_id}.{pid}.stdout.log"
+            )
+            stderr_path = os.path.join(
+                self._log_dir, f"{self._name}.{self._component_id}.{pid}.stderr.log"
+            )
             if not self._triton_log_path:
                 self._triton_log_path = os.path.join(
-                    self._log_dir, f"{self._name}.triton.log"
+                    self._log_dir, f"{self._name}.{self._component_id}.{pid}.triton.log"
                 )
             sys.stdout = open(stdout_path, "w", buffering=1)
             sys.stderr = open(stderr_path, "w", buffering=1)
@@ -349,55 +361,34 @@ class Worker:
             loop.add_signal_handler(
                 sig, lambda s=sig: asyncio.create_task(self.shutdown(s))  # type: ignore
             )
+        serve_result = None
         try:
             if self._metrics_port:
-                loop.create_task(self.serve())
+                serve_result = loop.create_task(self.serve())
                 self._metrics_server = self._setup_metrics_server()
                 assert self._metrics_server, "Unable to start metrics server"
                 loop.run_until_complete(self._metrics_server.serve())
             else:
-                loop.run_until_complete(self.serve())
+                serve_result = loop.run_until_complete(self.serve())
         except asyncio.CancelledError:
-            pass
             logger.info("Worker cancelled!")
         finally:
             loop.run_until_complete(self._wait_for_tasks(loop))
             loop.close()
             logger.info("Successfully shutdown worker.")
+            if isinstance(serve_result, asyncio.Task):
+                exit_condition = serve_result.result()
+            else:
+                exit_condition = serve_result
+
             sys.stdout.flush()
             sys.stderr.flush()
+
             if self._log_dir:
                 sys.stdout.close()
                 sys.stderr.close()
 
-
-class Deployment:
-    def __init__(self, worker_configs: list[WorkerConfig]):
-        self._process_context = multiprocessing.get_context("spawn")
-        self._worker_configs = worker_configs
-        self._workers: list[multiprocessing.context.SpawnProcess] = []
-
-    @staticmethod
-    def _start_worker(worker_config):
-        Worker(worker_config).start()
-
-    def start(self):
-        for worker_config in self._worker_configs:
-            self._workers.append(
-                self._process_context.Process(
-                    target=Deployment._start_worker,
-                    name=worker_config.name,
-                    args=[worker_config],
-                )
-            )
-
-    def shutdown(self, join=True, timeout=10):
-        for worker in self._workers:
-            worker.terminate()
-        if join:
-            for worker in self._workers:
-                worker.join(timeout)
-            for worker in self._workers:
-                if worker.is_alive():
-                    worker.kill()
-                    worker.join(timeout)
+        if exit_condition is not None:
+            sys.exit(1)
+        else:
+            sys.exit(0)

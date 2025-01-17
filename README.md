@@ -15,7 +15,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-
 # Triton Distributed
 
 <h4> A Datacenter Scale Distributed Inference Serving Framework </h4>
@@ -84,14 +83,3 @@ HF_TOKEN```) and mounts common directories such as ```/tmp:/tmp```,
 
 Please see the instructions in the corresponding example for specific
 deployment instructions.
-
-
-<!--
-
-## Goals
-
-## Concepts
-
-## Examples
-
--->
