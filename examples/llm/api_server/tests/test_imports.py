@@ -13,22 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-fastapi==0.115.6
-ftfy
-grpcio-tools==1.66.0
-httpx
-mypy
-numpy
-opentelemetry-api
-opentelemetry-sdk
-pre-commit
-protobuf==5.27.3
-pydantic==2.7.1
-pyright
-pytest-md-report
-pytest-mypy
-sentencepiece
-transformers
-tritonclient==2.53.0
-# TODO: See whether TRT-LLM installs a different version of UCX. Need to revisit and track this dependency.
-ucx-py-cu12
+
+import pytest
+
+pytestmark = pytest.mark.pre_merge
+
+
+def test_imports():
+    from engine.engine import LLMEngine as e
+    from frontend.fastapi_frontend import FastApiFrontend as f
+
+    # Placeholder to avoid unused import errors or removal by linters
+    assert e, f
