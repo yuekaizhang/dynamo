@@ -319,7 +319,24 @@ In the commands above, we used the FP8 variant `neuralmagic/Meta-Llama-3.1-8B-In
 ```
 
 
-## 7. Known Issues & Limitations
+## 7. Multi-node Deployment
+
+To deploy the solution in a multi-node environment please refer to [deploy_llama_8b_disaggregated_multinode.sh](examples/llm/vllm/deploy/deploy_llama_8b_disaggregated_multinode.sh) script. On a head node run NATS server, API server and context worker with
+
+```
+./examples/llm/vllm/deploy/deploy_llama_8b_disaggregated.sh context --head-url <head url>
+```
+
+On the second node run the generate worker
+
+```
+./examples/llm/vllm/deploy/deploy_llama_8b_disaggregated.sh generate --head-url <head url>
+```
+The example script is set by default to launch one context worker with TP 1 on the head node and one generate worker with TP 1 on the secondary node. This can be changed for other configurations - see the script for details.
+
+
+
+## 8. Known Issues & Limitations
 
 1. **Fixed Worker Count**
    Currently, the number of prefill and decode workers must be fixed at the start of deployment. Dynamically adding or removing workers is not yet supported.
@@ -333,8 +350,14 @@ In the commands above, we used the FP8 variant `neuralmagic/Meta-Llama-3.1-8B-In
 4. **Experimental Patch**
    The required vLLM patch is experimental and not yet merged into upstream vLLM. Future releases may remove the need for a custom patch.
 
+5. **Single generate worker**
+   Only one generate worker can be used in a single deployment.
 
-## 8. References
+6. **Streaming**
+   When streaming is enabled, only two responses will be returned in the stream: the first token and the complete response.
+
+
+## 9. References
 
 [^1]: Yinmin Zhong, Shengyu Liu, Junda Chen, Jianbo Hu, Yibo Zhu, Xuanzhe Liu, Xin Jin, and Hao
 Zhang. Distserve: Disaggregating prefill and decoding for goodput-optimized large language
