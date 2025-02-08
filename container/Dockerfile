@@ -25,8 +25,10 @@ USER root
 
 # TODO: separate dev from runtime dependendcies
 
+# Rust build/dev dependencies
 RUN apt-get update; apt-get install -y gdb protobuf-compiler
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+RUN pip install maturin
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Install OpenAI-compatible frontend and its dependencies from triton server
@@ -117,7 +119,6 @@ ENV VLLM_GENERATE_WORKERS=${VLLM_FRAMEWORK:+1}
 ENV VLLM_BASELINE_TP_SIZE=${VLLM_FRAMEWORK:+1}
 ENV VLLM_CONTEXT_TP_SIZE=${VLLM_FRAMEWORK:+1}
 ENV VLLM_GENERATE_TP_SIZE=${VLLM_FRAMEWORK:+1}
-ENV VLLM_LOGGING_LEVEL=${VLLM_FRAMEWORK:+INFO}
 ENV PYTHONUNBUFFERED=1
 
 # Install NATS - pointing toward NATS github instead of binaries.nats.dev due to server instability
@@ -152,7 +153,17 @@ WORKDIR /workspace
 #TODO Exclude container directory
 COPY . /workspace
 
-RUN cd runtime/rust && cargo build --release --locked && cargo doc --no-deps
+RUN cd runtime/rust && \
+    cargo build --release --locked && cargo doc --no-deps
+
+# Create virtualenv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+RUN mkdir /opt/triton && \
+    uv venv /opt/triton/venv --python 3.12 && \
+    source /opt/triton/venv/bin/activate && \
+    cd runtime/rust/python-wheel && \
+    maturin develop
+
 RUN /workspace/icp/protos/gen_python.sh
 
 # Install python packages
