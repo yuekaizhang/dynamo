@@ -35,7 +35,7 @@ pub struct NvCreateChatCompletionRequest {
 }
 
 #[derive(Serialize, Deserialize, Validate, Debug, Clone)]
-pub struct ChatCompletionResponse {
+pub struct NvCreateChatCompletionResponse {
     #[serde(flatten)]
     pub inner: async_openai::types::CreateChatCompletionResponse,
 }
