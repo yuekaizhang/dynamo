@@ -4,7 +4,7 @@ on:
   pull_request:
 
 jobs:
-    codeql:
+  codeql:
     name: Analyze Codebase
     runs-on: ubuntu-latest
     permissions:
