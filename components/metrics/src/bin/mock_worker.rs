@@ -14,10 +14,10 @@
 // limitations under the License.
 
 use async_nats::service::endpoint::Stats;
-use dynemo_llm::kv_router::{
+use dynamo_llm::kv_router::{
     protocols::ForwardPassMetrics, scheduler::KVHitRateEvent, KV_HIT_RATE_SUBJECT,
 };
-use dynemo_runtime::{
+use dynamo_runtime::{
     component::Namespace,
     logging,
     pipeline::{
@@ -123,7 +123,7 @@ fn mock_stats_handler(_stats: Stats) -> serde_json::Value {
 }
 
 async fn backend(runtime: DistributedRuntime) -> Result<()> {
-    let namespace = runtime.namespace("dynemo")?;
+    let namespace = runtime.namespace("dynamo")?;
 
     // Spawn background task for publishing KV hit rate events
     let namespace_clone = namespace.clone();

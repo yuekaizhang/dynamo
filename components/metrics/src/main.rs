@@ -27,9 +27,9 @@
 //!   - ISL Blocks: Cumulative count of total blocks in all KV hit rate events
 //!   - Overlap Blocks: Cumulative count of blocks that were already in the KV cache
 use clap::Parser;
-use dynemo_llm::kv_router::scheduler::KVHitRateEvent;
-use dynemo_llm::kv_router::KV_HIT_RATE_SUBJECT;
-use dynemo_runtime::{
+use dynamo_llm::kv_router::scheduler::KVHitRateEvent;
+use dynamo_llm::kv_router::KV_HIT_RATE_SUBJECT;
+use dynamo_runtime::{
     error, logging,
     traits::events::{EventPublisher, EventSubscriber},
     utils::{Duration, Instant},
@@ -57,7 +57,7 @@ struct Args {
     endpoint: String,
 
     /// Namespace to operate in
-    #[arg(long, env = "DYN_NAMESPACE", default_value = "dynemo")]
+    #[arg(long, env = "DYN_NAMESPACE", default_value = "dynamo")]
     namespace: String,
 
     /// Polling interval in seconds (minimum 1 second)

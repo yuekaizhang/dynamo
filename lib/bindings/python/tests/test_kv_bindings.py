@@ -24,8 +24,8 @@ from typing import List
 
 import pytest
 
-from dynemo.llm import KvIndexer, KvMetricsAggregator, KvMetricsPublisher
-from dynemo.runtime import DistributedRuntime
+from dynamo.llm import KvIndexer, KvMetricsAggregator, KvMetricsPublisher
+from dynamo.runtime import DistributedRuntime
 
 pytestmark = pytest.mark.pre_merge
 
@@ -89,7 +89,7 @@ async def test_event_handler():
 
 
 # KV events
-class DynemoResult:
+class DynamoResult:
     OK = 0
     ERR = 1
 
@@ -101,13 +101,13 @@ class EventPublisher:
 
         # load event publisher library
         self.lib = ctypes.CDLL(os.environ["VLLM_KV_CAPI_PATH"])
-        self.lib.dynemo_llm_init.argtypes = [c_char_p, c_char_p, c_int64]
-        self.lib.dynemo_llm_init.restype = c_uint32
-        result = self.lib.dynemo_llm_init(
+        self.lib.dynamo_llm_init.argtypes = [c_char_p, c_char_p, c_int64]
+        self.lib.dynamo_llm_init.restype = c_uint32
+        result = self.lib.dynamo_llm_init(
             namespace.encode(), component.encode(), worker_id
         )
-        assert result == DynemoResult.OK
-        self.lib.dynemo_kv_event_publish_stored.argtypes = [
+        assert result == DynamoResult.OK
+        self.lib.dynamo_kv_event_publish_stored.argtypes = [
             ctypes.c_uint64,  # event_id
             ctypes.POINTER(ctypes.c_uint32),  # token_ids
             ctypes.POINTER(ctypes.c_size_t),  # num_block_tokens
@@ -116,18 +116,18 @@ class EventPublisher:
             ctypes.POINTER(ctypes.c_uint64),  # parent_hash
             ctypes.c_uint64,  # lora_id
         ]
-        self.lib.dynemo_kv_event_publish_stored.restype = (
+        self.lib.dynamo_kv_event_publish_stored.restype = (
             ctypes.c_uint32
-        )  # dynemo_llm_result_t
+        )  # dynamo_llm_result_t
 
-        self.lib.dynemo_kv_event_publish_removed.argtypes = [
+        self.lib.dynamo_kv_event_publish_removed.argtypes = [
             ctypes.c_uint64,  # event_id
             ctypes.POINTER(ctypes.c_uint64),  # block_ids
             ctypes.c_size_t,  # num_blocks
         ]
-        self.lib.dynemo_kv_event_publish_removed.restype = (
+        self.lib.dynamo_kv_event_publish_removed.restype = (
             ctypes.c_uint32
-        )  # dynemo_llm_result_t
+        )  # dynamo_llm_result_t
 
     def store_event(self, tokens, lora_id):
         parent_hash = (
@@ -135,7 +135,7 @@ class EventPublisher:
             if self.event_id_counter > 0
             else None
         )
-        result = self.lib.dynemo_kv_event_publish_stored(
+        result = self.lib.dynamo_kv_event_publish_stored(
             self.event_id_counter,  # uint64_t event_id
             (ctypes.c_uint32 * len(tokens))(*tokens),  # const uint32_t *token_ids
             (ctypes.c_size_t * 1)(len(tokens)),  # const uintptr_t *num_block_tokens
@@ -147,17 +147,17 @@ class EventPublisher:
         self.block_ids.append(self.event_id_counter)
         self.event_id_counter += 1
 
-        assert result == DynemoResult.OK
+        assert result == DynamoResult.OK
 
     def remove_event(self):
-        result = self.lib.dynemo_kv_event_publish_removed(
+        result = self.lib.dynamo_kv_event_publish_removed(
             self.event_id_counter,  # uint64_t event_id
             (ctypes.c_uint64 * 1)(self.block_ids[-1]),  # const uint64_t *block_ids
             1,  # uintptr_t num_blocks
         )
         self.event_id_counter += 1
 
-        assert result == DynemoResult.OK
+        assert result == DynamoResult.OK
 
 
 async def test_metrics_aggregator():
