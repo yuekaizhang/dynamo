@@ -15,7 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# NVIDIA Dynamo
+# NVIDIA Dynamo [![Discord](https://dcbadge.limes.pink/api/server/D92uqZRjCZ)](https://discord.gg/D92uqZRjCZ)
 
 <table width="100%">
   <tr>
@@ -37,6 +37,8 @@ limitations under the License.
   </tr>
 </table>
 
+
+  
 
 | **[Guides](docs/guides)** | **[Architecture and Features](docs/architecture.md)** | **[APIs](lib/bindings/python/README.md)** | **[SDK](deploy/dynamo/sdk/README.md)** |
 
