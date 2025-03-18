@@ -27,13 +27,7 @@ from vllm.entrypoints.openai.api_server import (
 from vllm.inputs.data import TokensPrompt
 from vllm.remote_prefill import RemotePrefillParams, RemotePrefillRequest
 
-from dynamo.sdk import (
-    async_on_start,
-    dynamo_context,
-    dynamo_endpoint,
-    server_context,
-    service,
-)
+from dynamo.sdk import async_on_start, dynamo_context, dynamo_endpoint, service
 
 
 class RequestType(BaseModel):
@@ -52,12 +46,6 @@ class PrefillWorker:
     def __init__(self):
         class_name = self.__class__.__name__
         self.engine_args = parse_vllm_args(class_name, "")
-        gpu_idx = (
-            self.engine_args.cuda_visible_device_offset
-            + server_context.worker_index
-            - 1
-        )
-        os.environ["CUDA_VISIBLE_DEVICES"] = f"{gpu_idx}"
         self._loaded_metadata = set()
         self.initialized = False
         if self.engine_args.enable_chunked_prefill is not False:

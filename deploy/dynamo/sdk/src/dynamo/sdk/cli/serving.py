@@ -36,8 +36,7 @@ from circus.sockets import CircusSocket
 from circus.watcher import Watcher
 from simple_di import Provide, inject
 
-if t.TYPE_CHECKING:
-    from _bentoml_impl.server.allocator import ResourceAllocator
+from .allocator import ResourceAllocator
 
 
 # Define a Protocol for services to ensure type safety
@@ -271,7 +270,6 @@ def serve_http(
     threaded: bool = False,
 ) -> Server:
     from _bentoml_impl.loader import import_service, normalize_identifier
-    from _bentoml_impl.server.allocator import ResourceAllocator
     from bentoml._internal.log import SERVER_LOGGING_CONFIG
     from bentoml._internal.utils import reserve_free_port
     from bentoml._internal.utils.analytics.usage_stats import track_serve
@@ -284,6 +282,8 @@ def serve_http(
         make_reload_plugin,
     )
     from circus.sockets import CircusSocket
+
+    from .allocator import ResourceAllocator
 
     bento_id: str = ""
     env = {"PROMETHEUS_MULTIPROC_DIR": ensure_prometheus_dir()}

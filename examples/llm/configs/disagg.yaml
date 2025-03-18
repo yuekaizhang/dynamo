@@ -39,6 +39,4 @@ PrefillWorker:
   model: deepseek-ai/DeepSeek-R1-Distill-Llama-8B
   kv-transfer-config: '{"kv_connector":"DynamoNixlConnector"}'
   max-model-len: 16384
-
-  # dynamo arg for local deployment
-  cuda-visible-device-offset: 1
+  max-num-batched-tokens: 16384
