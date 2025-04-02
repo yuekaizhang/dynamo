@@ -1483,6 +1483,7 @@ func (r *DynamoNimDeploymentReconciler) generateDeployment(ctx context.Context, 
 	}
 
 	var replicas *int32
+	replicas = opt.dynamoNimDeployment.Spec.Replicas
 	if opt.isStealingTrafficDebugModeEnabled {
 		replicas = &[]int32{int32(1)}[0]
 	}
