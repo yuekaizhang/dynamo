@@ -46,6 +46,10 @@ const (
 	PendingState = "pending"
 )
 
+type etcdStorage interface {
+	DeleteKeys(ctx context.Context, prefix string) error
+}
+
 // DynamoDeploymentReconciler reconciles a DynamoDeployment object
 type DynamoDeploymentReconciler struct {
 	client.Client
@@ -106,6 +110,15 @@ func (r *DynamoDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		logger.Info("Reconciliation done")
 	}()
 
+	deleted, err := commonController.HandleFinalizer(ctx, dynamoDeployment, r.Client, r)
+	if err != nil {
+		reason = "failed_to_handle_the_finalizer"
+		return ctrl.Result{}, err
+	}
+	if deleted {
+		return ctrl.Result{}, nil
+	}
+
 	// fetch the DynamoNIMConfig
 	dynamoNIMConfig, err := nim.GetDynamoNIMConfig(ctx, dynamoDeployment, r.Recorder)
 	if err != nil {
@@ -114,7 +127,7 @@ func (r *DynamoDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// generate the DynamoNimDeployments from the config
-	dynamoNimDeployments, err := nim.GenerateDynamoNIMDeployments(dynamoDeployment, dynamoNIMConfig)
+	dynamoNimDeployments, err := nim.GenerateDynamoNIMDeployments(ctx, dynamoDeployment, dynamoNIMConfig)
 	if err != nil {
 		reason = "failed_to_generate_the_DynamoNimDeployments"
 		return ctrl.Result{}, err
@@ -123,7 +136,7 @@ func (r *DynamoDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// merge the DynamoNimDeployments with the DynamoNimDeployments from the CRD
 	for serviceName, deployment := range dynamoNimDeployments {
 		if _, ok := dynamoDeployment.Spec.Services[serviceName]; ok {
-			err := mergo.Merge(deployment, dynamoDeployment.Spec.Services[serviceName], mergo.WithOverride)
+			err := mergo.Merge(&deployment.Spec.DynamoNimDeploymentSharedSpec, dynamoDeployment.Spec.Services[serviceName].DynamoNimDeploymentSharedSpec, mergo.WithOverride)
 			if err != nil {
 				reason = "failed_to_merge_the_DynamoNimDeployments"
 				return ctrl.Result{}, err
@@ -209,6 +222,11 @@ func mergeEnvs(common, specific []corev1.EnvVar) []corev1.EnvVar {
 		merged = append(merged, env)
 	}
 	return merged
+}
+
+func (r *DynamoDeploymentReconciler) FinalizeResource(ctx context.Context, dynamoDeployment *nvidiacomv1alpha1.DynamoDeployment) error {
+	// for now doing nothing
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
