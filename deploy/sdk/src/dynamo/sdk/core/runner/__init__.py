@@ -12,24 +12,13 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
+#  Modifications Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES
 
-from typing import Any
+from enum import Enum
 
-from bentoml import on_shutdown as async_on_shutdown
 
-from dynamo.sdk.core.decorators.endpoint import dynamo_api, dynamo_endpoint
-from dynamo.sdk.core.lib import DYNAMO_IMAGE, depends, service
-from dynamo.sdk.lib.decorators import async_on_start
+class TargetEnum(str, Enum):
+    """The target deployment environment for the service"""
 
-dynamo_context: dict[str, Any] = {}
-
-__all__ = [
-    "DYNAMO_IMAGE",
-    "async_on_shutdown",
-    "async_on_start",
-    "depends",
-    "dynamo_context",
-    "dynamo_endpoint",
-    "dynamo_api",
-    "service",
-]
+    DYNAMO = "dynamo"
+    BENTO = "bento"
