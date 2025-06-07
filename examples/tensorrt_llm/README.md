@@ -118,6 +118,17 @@ cd /workspace/examples/tensorrt_llm
 dynamo serve graphs.disagg_router:Frontend -f ./configs/disagg_router.yaml
 ```
 
+#### Aggregated serving with Multi-Token Prediction(MTP) and DeepSeek R1
+```bash
+cd /workspace/examples/tensorrt_llm
+dynamo serve graphs.agg:Frontend -f configs/deepseek_r1/mtp/mtp_agg.yaml
+```
+Notes:
+- There is a noticeable latency for the first two inference requests. Please send warm-up requests before starting the benchmark.
+- Please keep the `cuda_graph_padding_enabled` setting as `false` in the model engine's configuration. There is a known bug, and the fix will be included in the next release of TensorRT-LLM.
+- MTP support for Disaggregation in Dynamo + TensorRT-LLM is coming soon.
+- MTP performance may vary depending on the acceptance rate of predicted tokens, which is dependent on the dataset or queries used while benchmarking
+
 #### Multi-Node Disaggregated Serving
 
 In the following example, we will demonstrate how to run a Disaggregated Serving
