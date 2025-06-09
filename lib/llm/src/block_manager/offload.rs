@@ -42,9 +42,10 @@
 //! The [`OffloadManager::onboard_worker`] is responsible for onboarding blocks.
 //!
 //! The kind of offloads/onboards they perform is dictated by the source and target arguments
-//! of the [`OffloadManager::offload`] and [`OffloadManager::onboard`] methods.
+//! of the [`OffloadManager::offload_worker`] and [`OffloadManager::onboard_worker`] methods.
 
 use super::block::{BlockError, BlockMetadata, BlockState, ImmutableBlock, TransferContext};
+use super::metrics::{BlockManagerMetrics, PoolMetrics};
 use super::pool::BlockPoolError;
 use super::storage::{Cuda, Storage};
 use super::{BlockPool, DeviceStorage, DiskStorage, PinnedStorage};
@@ -101,6 +102,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
         device: Option<Arc<BlockPool<DeviceStorage, Metadata>>>,
         nixl_agent: Arc<Option<NixlAgent>>,
         async_rt_handle: Handle,
+        metrics: Arc<BlockManagerMetrics>,
         cancellation_token: CancellationToken,
     ) -> Result<Arc<Self>> {
         let (device_offload_tx, device_offload_rx) = mpsc::unbounded_channel();
@@ -119,8 +121,6 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
             disk_onboard_tx,
             tick: Arc::new(Mutex::new(0)),
         });
-
-        let this_clone = this.clone();
 
         let cuda_ctx = Cuda::device_or_create(0)?;
 
@@ -147,6 +147,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
                 &async_rt_handle,
                 cancellation_token.clone(),
             )),
+            metrics.pool("device"),
             cancellation_token.clone(),
         );
         CriticalTaskExecutionHandle::new_with_runtime(
@@ -179,6 +180,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
                 &async_rt_handle,
                 cancellation_token.clone(),
             )),
+            metrics.pool("host"),
             cancellation_token.clone(),
         );
         CriticalTaskExecutionHandle::new_with_runtime(
@@ -205,6 +207,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
                 &async_rt_handle,
                 cancellation_token.clone(),
             )),
+            metrics.pool("host"),
             cancellation_token.clone(),
         );
         CriticalTaskExecutionHandle::new_with_runtime(
@@ -231,6 +234,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
                 &async_rt_handle,
                 cancellation_token.clone(),
             )),
+            metrics.pool("disk"),
             cancellation_token.clone(),
         );
         CriticalTaskExecutionHandle::new_with_runtime(
@@ -241,7 +245,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
         )?
         .detach();
 
-        Ok(this_clone)
+        Ok(this)
     }
 
     async fn offload_worker<Source: Storage, Target: Storage>(
@@ -249,6 +253,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
         target_pool: Option<Arc<BlockPool<Target, Metadata>>>,
         mut offload_rx: mpsc::UnboundedReceiver<OffloadRequest<Source, Metadata>>,
         transfer_manager: Arc<dyn TransferManager<Source, Target, Metadata>>,
+        pool_metrics: Arc<PoolMetrics>,
         cancellation_token: CancellationToken,
     ) -> Result<()> {
         if source_pool.is_none() || target_pool.is_none() {
@@ -270,6 +275,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
                 match offload_rx.try_recv() {
                     Ok(request) => {
                         queue.insert(request);
+                        pool_metrics.gauge("offload_queue_size").inc();
                     }
                     Err(TryRecvError::Empty) => {
                         break;
@@ -280,6 +286,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
 
             // If there is a request, process it.
             if let Some(request) = queue.pop_first() {
+                pool_metrics.gauge("offload_queue_size").dec();
                 // Try to upgrade the block to a strong reference.
                 let block = match request.block.upgrade() {
                     Some(block) => Some(block),
@@ -311,6 +318,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
                     };
 
                     if let Some(target_block) = target_blocks.into_iter().next() {
+                        pool_metrics.counter("offload_processed").inc();
                         transfer_manager
                             .enqueue_transfer(PendingTransfer::new(
                                 vec![block],
@@ -327,6 +335,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
                     _ = cancellation_token.cancelled() => return Ok(()),
                     Some(request) = offload_rx.recv() => {
                         queue.insert(request);
+                        pool_metrics.gauge("offload_queue_size").inc();
                     }
                 }
             }
@@ -338,6 +347,7 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
         target_pool: Option<Arc<BlockPool<Target, Metadata>>>,
         mut onboard_rx: mpsc::UnboundedReceiver<OnboardRequest<Source, Target, Metadata>>,
         transfer_manager: Arc<dyn TransferManager<Source, Target, Metadata>>,
+        pool_metrics: Arc<PoolMetrics>,
         cancellation_token: CancellationToken,
     ) -> Result<()> {
         if source_pool.is_none() || target_pool.is_none() {
@@ -349,6 +359,11 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
             tokio::select! {
                 _ = cancellation_token.cancelled() => return Ok::<(), anyhow::Error>(()),
                 Some(request) = onboard_rx.recv() => {
+
+                    pool_metrics
+                        .gauge("onboard_queue_size")
+                        .set(onboard_rx.len() as i64);
+
                     // Try to allocate blocks on the device.
                     let target_blocks = match target_pool.allocate_blocks(request.blocks.len()).await {
                         Ok(blocks) => blocks,
@@ -357,6 +372,10 @@ impl<Metadata: BlockMetadata> OffloadManager<Metadata> {
                             continue;
                         }
                     };
+
+                    pool_metrics
+                        .counter("onboard_processed")
+                        .inc_by(request.blocks.len() as u64);
 
                     let sources = request
                         .blocks
@@ -535,6 +554,7 @@ mod tests {
 
     use aligned_vec::avec;
     use cudarc::runtime::sys::{cudaMemcpy, cudaMemcpyKind, cudaMemset};
+    use prometheus::Registry;
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::mem::ManuallyDrop;
@@ -621,6 +641,7 @@ mod tests {
             device_pool.clone(),
             agent_arc,
             async_rt_handle,
+            BlockManagerMetrics::new(&Arc::new(Registry::new()))?,
             CancellationToken::new(),
         )?;
 
