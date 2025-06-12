@@ -85,8 +85,8 @@ With the Dynamo repository, benchmarking image and model available, and **NATS a
     ./container/run.sh --mount-workspace
     ```
 
-    > [!Tip]
-    > The huggingface home source mount can be changed by setting `--hf-cache ~/.cache/huggingface`.
+> [!Tip]
+> The huggingface home source mount can be changed by setting `--hf-cache ~/.cache/huggingface`.
 
  2. Start disaggregated services
 
@@ -95,8 +95,8 @@ With the Dynamo repository, benchmarking image and model available, and **NATS a
     dynamo serve benchmarks.disagg:Frontend -f benchmarks/disagg.yaml 1> disagg.log 2>&1 &
     ```
 
-    > [!Tip]
-    > Check the `disagg.log` to make sure the service is fully started before collecting performance numbers.
+> [!Tip]
+> Check the `disagg.log` to make sure the service is fully started before collecting performance numbers.
 
  3. Collect the performance numbers:
 
@@ -130,8 +130,8 @@ With the Dynamo repository, benchmarking image and model available, and **NATS a
     ./container/run.sh --mount-workspace
     ```
 
-    > [!Tip]
-    > The huggingface home source mount can be changed by setting `--hf-cache ~/.cache/huggingface`.
+> [!Tip]
+> The huggingface home source mount can be changed by setting `--hf-cache ~/.cache/huggingface`.
 
  2. Config NATS and ETCD (node 1)
 
@@ -140,8 +140,8 @@ With the Dynamo repository, benchmarking image and model available, and **NATS a
     export ETCD_ENDPOINTS="<node_0_ip_addr>:2379"
     ```
 
-    > [!Important]
-    > Node 1 must be able to reach Node 0 over the network for the above services.
+> [!Important]
+> Node 1 must be able to reach Node 0 over the network for the above services.
 
  3. Start workers (node 0)
 
@@ -150,8 +150,8 @@ With the Dynamo repository, benchmarking image and model available, and **NATS a
     dynamo serve benchmarks.disagg_multinode:Frontend -f benchmarks/disagg_multinode.yaml 1> disagg_multinode.log 2>&1 &
     ```
 
-    > [!Tip]
-    > Check the `disagg_multinode.log` to make sure the service is fully started before collecting performance numbers.
+> [!Tip]
+> Check the `disagg_multinode.log` to make sure the service is fully started before collecting performance numbers.
 
  4. Start workers (node 1)
 
@@ -160,8 +160,8 @@ With the Dynamo repository, benchmarking image and model available, and **NATS a
     dynamo serve components.prefill_worker:PrefillWorker -f benchmarks/disagg_multinode.yaml 1> prefill_multinode.log 2>&1 &
     ```
 
-    > [!Tip]
-    > Check the `prefill_multinode.log` to make sure the service is fully started before collecting performance numbers.
+> [!Tip]
+> Check the `prefill_multinode.log` to make sure the service is fully started before collecting performance numbers.
 
  5. Collect the performance numbers:
 
@@ -188,8 +188,8 @@ With the Dynamo repository and the benchmarking image available, perform the fol
     ./container/run.sh --mount-workspace
     ```
 
-    > [!Tip]
-    > The Hugging Face home source mount can be changed by setting `--hf-cache ~/.cache/huggingface`.
+> [!Tip]
+> The Hugging Face home source mount can be changed by setting `--hf-cache ~/.cache/huggingface`.
 
  2. Start vLLM serve
 
@@ -212,10 +212,10 @@ With the Dynamo repository and the benchmarking image available, perform the fol
       --port 8002 1> vllm_1.log 2>&1 &
     ```
 
-    > [!Tip]
-    > Check the `vllm_0.log` and `vllm_1.log` to make sure the service is fully started before collecting performance numbers.
-    >
-    > If benchmarking with two or more nodes, `--tensor-parallel-size 8` should be used and only run one `vllm serve` instance per node.
+> [!Tip]
+> Check the `vllm_0.log` and `vllm_1.log` to make sure the service is fully started before collecting performance numbers.
+>
+> If benchmarking with two or more nodes, `--tensor-parallel-size 8` should be used and only run one `vllm serve` instance per node.
 
  3. Use NGINX as load balancer
 
@@ -225,8 +225,8 @@ With the Dynamo repository and the benchmarking image available, perform the fol
     service nginx restart
     ```
 
-    > [!Note]
-    > If benchmarking over 2 nodes, the `upstream` configuration will need to be updated to link to the `vllm serve` on the second node.
+> [!Note]
+> If benchmarking over 2 nodes, the `upstream` configuration will need to be updated to link to the `vllm serve` on the second node.
 
  4. Collect the performance numbers:
 
@@ -258,7 +258,8 @@ Note: As each `perf.sh` adds a new artifacts directory in the `artifacts_root` a
 > @ [GitHub](https://github.com/triton-inference-server/perf_analyzer) for additional information about how to run GenAI-Perf
 > and how to interpret results.
 
-## Iterpreting Results
+
+## Interpreting Results
 
 ### Plotting Pareto Graphs
 
