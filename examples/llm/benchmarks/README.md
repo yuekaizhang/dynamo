@@ -337,6 +337,57 @@ Regardless of the deployment mechanism, the GenAI-Perf tool will report the same
 - [Dynamo vLLM Deployments](../../../docs/examples/llm_deployment.md)
 
 
+## Monitor Benchmark Startup Status
+
+When running dynamo deployment, you may have multiple instances of the same worker kind for a particular benchmark run.
+The deployment can process the workflow as long as at least one worker is ready, in the case where the benchmark is run
+as soon as dynamo is responsive to inference request, which may result in inaccurate benchmark result at the beginning of
+the benchmark. In such a case, you may additionally deploy benchmark watcher to provide signal on whether the full deployment
+is ready. For instance, if you expect the total number of prefill and decode workers to be 10, you can run the below to start
+the watcher, which will exit if the total number is less than 10 after timeout. In addition to that, the watcher will create
+a HTTP server on port 7001 by default, which you can use to send GET request for readiness to build external benchmarking workflow.
+
+```bash
+# start your benchmark deployment
+...
+
+# start monitor separately, or it can be part of the deployment above
+dynamo serve --service-name Watcher benchmark_watcher:Watcher --Watcher.total-workers=10 --Watcher.timeout=10
+
+# Send curl request to check liveness
+curl localhost:7001
+127.0.0.1 - - [12/Jun/2025 23:31:52] "GET / HTTP/1.1" 400 -
+...
+curl localhost:7001
+127.0.0.1 - - [12/Jun/2025 23:32:46] "GET / HTTP/1.1" 200 -
+```
+
+## Utility for Setting Up Environment
+
+### vLLM
+- `vllm_multinode_setup.sh` is a helper script to configure the node for dynamo deployment for
+vLLM. Depending on whether environment variable `HEAD_NODE_IP` and `RAY_LEADER_NODE_IP` are set
+when the script is invoked, it will:
+  - start nats server and etcd on the current node if `HEAD_NODE_IP` is not set, otherwise
+  set the environment variables as expected by dynamo.
+  - run Ray and connect to the Ray cluster started by `RAY_LEADER_NODE_IP`, otherwise start
+  the Ray cluster with current node as the head node.
+  - print the command with `HEAD_NODE_IP` and `RAY_LEADER_NODE_IP` set, which can be used in
+  another node to setup connectivity with the current node.
+
+  ```bash
+  # On node 0
+  source vllm_multinode_setup.sh
+  ... # starting nats server, etcd and ray cluster
+
+  # script print command
+  HEAD_NODE_IP=NODE_0_IP RAY_LEADER_NODE_IP=NODE_0_IP source vllm_multinode_setup.sh
+
+  # On node 1
+  HEAD_NODE_IP=NODE_0_IP RAY_LEADER_NODE_IP=NODE_0_IP source vllm_multinode_setup.sh
+  ... # connecting to Ray cluster
+  ```
+
 ## Metrics and Visualization
 
 For instructions on how to acquire per worker metrics and visualize them using Grafana,
