@@ -71,6 +71,20 @@ cd /workspace/examples/sglang
 dynamo serve graphs.agg:Frontend -f ./configs/agg.yaml
 ```
 
+#### Aggregated with router
+
+> [!NOTE]
+> The current implementation of `examples/sglang/components/worker.py` publishes _placeholder_ engine metrics to keep the Dynamo KV-router happy. Real-time metrics will be surfaced directly from the SGLang engine once the following pull requests are merged:
+> • Upstream: [sgl-project/sglang #6721](https://github.com/sgl-project/sglang/pull/6721) – _Expose runtime KV-cache & request metrics_.
+> • Dynamo: [ai-dynamo/dynamo #1465](https://github.com/ai-dynamo/dynamo/pull/1465) – _feat: receive kvmetrics from sglang scheduler_.
+>
+> After these are in, the TODOs in `worker.py` will be resolved and the placeholder logic removed.
+
+```bash
+cd /workspace/examples/sglang
+dynamo serve graphs.agg:Frontend -f ./configs/agg.yaml --Frontend.router=kv
+```
+
 #### Disaggregated
 
 <details>
