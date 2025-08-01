@@ -645,6 +645,7 @@ mod tests {
 mod test_prefixes {
     use super::create_test_drt;
     use super::*;
+    use prometheus::core::Collector;
 
     #[test]
     fn test_hierarchical_prefixes_and_parent_hierarchies() {
@@ -810,16 +811,26 @@ mod test_prefixes {
         );
         println!("Invalid namespace prefix: '{}'", invalid_namespace.prefix());
 
-        // Try to create a metric - this should fail because "@@123" gets stripped to "" which is invalid
+        // Try to create a metric - this should succeed because the namespace name will be sanitized
         let result = invalid_namespace.create_counter("test_counter", "A test counter", &[]);
         println!("Result with invalid namespace '@@123':");
         println!("{:?}", result);
 
-        // The result should be an error because empty metric names are invalid
+        // The result should fail because even after sanitization, the name "123" doesn't follow Prometheus naming pattern
         assert!(
             result.is_err(),
-            "Creating metric with namespace '@@123' should fail because it gets stripped to empty string"
+            "Creating metric with invalid namespace should fail even after sanitization"
         );
+
+        // Verify the error message indicates the sanitized name is still invalid
+        if let Err(e) = &result {
+            let error_msg = e.to_string();
+            assert!(
+                error_msg.contains("123"),
+                "Error message should mention the sanitized name '123', got: {}",
+                error_msg
+            );
+        }
 
         // For comparison, show a valid namespace works
         let valid_namespace = drt.namespace("test_namespace").unwrap();
