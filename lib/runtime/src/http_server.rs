@@ -347,9 +347,9 @@ mod tests {
         println!("Full metrics response:\n{}", response);
 
         let expected = "\
-# HELP dynamo_uptime_seconds Total uptime of the DistributedRuntime in seconds
-# TYPE dynamo_uptime_seconds gauge
-dynamo_uptime_seconds 42
+# HELP dynamo_component_dynamo_uptime_seconds Total uptime of the DistributedRuntime in seconds
+# TYPE dynamo_component_dynamo_uptime_seconds gauge
+dynamo_component_dynamo_uptime_seconds 42
 ";
         assert_eq!(response, expected);
     }
