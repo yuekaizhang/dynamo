@@ -132,7 +132,12 @@ async def init_prefill(runtime: DistributedRuntime, config: Config):
     """
     Instantiate and serve
     """
-    component = runtime.namespace(config.namespace).component(config.component)
+
+    component = (
+        runtime.namespace(config.namespace)
+        .component(config.component)
+        .add_labels([("model", config.model)])
+    )
     await component.create_service()
 
     generate_endpoint = component.endpoint(config.endpoint)
@@ -165,7 +170,11 @@ async def init(runtime: DistributedRuntime, config: Config):
     Instantiate and serve
     """
 
-    component = runtime.namespace(config.namespace).component(config.component)
+    component = (
+        runtime.namespace(config.namespace)
+        .component(config.component)
+        .add_labels([("model", config.model)])
+    )
     await component.create_service()
 
     generate_endpoint = component.endpoint(config.endpoint)
