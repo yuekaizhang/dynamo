@@ -58,8 +58,8 @@ Dynamo is designed to be inference engine agnostic (supports TRT-LLM, vLLM, SGLa
 | [**Disaggregated Serving**](/docs/architecture/disagg_serving.md) | ✅ | ✅ | ✅ |
 | [**Conditional Disaggregation**](/docs/architecture/disagg_serving.md#conditional-disaggregation) | 🚧 | 🚧 | 🚧 |
 | [**KV-Aware Routing**](/docs/architecture/kv_cache_routing.md) | ✅ | ✅ | ✅ |
-| [**SLA-Based Planner**](/docs/architecture/sla_planner.md) | ✅ | 🚧 | 🚧 |
-| [**Load Based Planner**](/docs/architecture/load_planner.md) | ✅ | 🚧 | 🚧 |
+| [**Load Based Planner**](/docs/architecture/load_planner.md) | 🚧 | 🚧 | 🚧 |
+| [**SLA-Based Planner**](/docs/architecture/sla_planner.md) | ✅ | ✅ | 🚧 |
 | [**KVBM**](/docs/architecture/kvbm_architecture.md) | 🚧 | 🚧 | 🚧 |
 
 To learn more about each framework and their capabilities, check out each framework's README!
@@ -255,7 +255,15 @@ source $HOME/.cargo/env
 
 ## 3. Create a Python virtual env:
 
+Follow the instructions in [uv installation](https://docs.astral.sh/uv/#installation) guide to install uv if you don't have `uv` installed. Once uv is installed, create a virtual environment and activate it.
+
+- Install uv
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+- Create a virtual environment
+```bash
 uv venv dynamo
 source dynamo/bin/activate
 ```
