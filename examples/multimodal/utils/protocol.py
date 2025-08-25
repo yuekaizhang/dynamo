@@ -105,8 +105,14 @@ class ImageContent(BaseModel):
     type: Literal["image_url"]
     image_url: ImageURLDetail
 
+class AudioURLDetail(BaseModel):
+    url: str
 
-MessageContent = Union[TextContent, ImageContent]
+class AudioContent(BaseModel):
+    type: Literal["audio_url"]
+    audio_url: AudioURLDetail
+
+MessageContent = Union[TextContent, ImageContent, AudioContent]
 
 
 class ChatMessage(BaseModel):
@@ -126,9 +132,12 @@ class MultiModalRequest(BaseModel):
 class vLLMMultimodalRequest(vLLMGenerateRequest):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     image_url: Optional[str] = None
+    audio_url: Optional[str] = None
     # image_features: Optional[List[List[List[float]]]] = None # Remove once have NIXL support
-    serialized_request: Optional[connect.SerializedRequest] = None
-
+    # serialized_request: Optional[connect.SerializedRequest] = None
+    serialized_request_image: Optional[connect.SerializedRequest] = None
+    serialized_request_audio: Optional[connect.SerializedRequest] = None
+    audio_embeddings_shape: Optional[List[int]] = None
 
 class EncodeRequest(BaseModel):
     """
@@ -136,7 +145,8 @@ class EncodeRequest(BaseModel):
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    image_url: str
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
     request_id: str
     serialized_request: Optional[connect.SerializedRequest] = None
 

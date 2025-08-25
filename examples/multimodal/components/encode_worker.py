@@ -23,7 +23,7 @@ from typing import AsyncIterator, Tuple
 
 import torch
 import uvloop
-from transformers import AutoImageProcessor, LlavaForConditionalGeneration
+from transformers import AutoImageProcessor, LlavaForConditionalGeneration, AutoProcessor, Qwen2AudioForConditionalGeneration
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.utils import FlexibleArgumentParser
 
@@ -34,6 +34,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import connect
 from utils.args import Config, base_parse_args, parse_endpoint
 from utils.image_loader import ImageLoader
+from utils.audio_loader import AudioLoader
 from utils.protocol import MyRequestOutput, vLLMMultimodalRequest
 
 configure_dynamo_logging()
@@ -60,17 +61,68 @@ class VllmEncodeWorker:
         self.downstream_endpoint = args.downstream_endpoint
         self.engine_args = engine_args
         self.model = self.engine_args.model
+        speech_model_keyworkds = ["Audio", "Omni"]
+        if any(keyword in self.model for keyword in speech_model_keyworkds):
+            self.is_speech_model = True
+        else:
+            self.is_speech_model = False
 
-        self.image_loader = ImageLoader(cache_size=CACHE_SIZE_MAXIMUM)
-        self.image_processor = AutoImageProcessor.from_pretrained(
-            self.model, trust_remote_code=True
-        )
-        # self.vision_model = load_vision_model(self.model)
-        self.vision_model = LlavaForConditionalGeneration.from_pretrained(
-            self.model, device_map="auto", torch_dtype=torch.float16
-        ).eval()
+        if self.is_speech_model:
+            self.audio_loader = AudioLoader(cache_size=CACHE_SIZE_MAXIMUM)
+            self.audio_processor = AutoProcessor.from_pretrained(
+                self.model, trust_remote_code=True
+            )
+            self.audio_model = Qwen2AudioForConditionalGeneration.from_pretrained(
+                self.model, device_map="auto", torch_dtype=torch.float16
+            ).eval()
+        else:
+            self.image_loader = ImageLoader(cache_size=CACHE_SIZE_MAXIMUM)
+            self.image_processor = AutoImageProcessor.from_pretrained(
+                self.model, trust_remote_code=True
+            )
+            # self.vision_model = load_vision_model(self.model)
+            self.vision_model = LlavaForConditionalGeneration.from_pretrained(
+                self.model, device_map="auto", torch_dtype=torch.float16
+            ).eval()
 
         self.min_workers = 1
+
+    def get_audio_embeddings(self, audio_features):
+        input_features, feature_attention_mask = audio_features.input_features, audio_features.feature_attention_mask
+        with torch.no_grad():
+            audio_feat_lengths, audio_output_lengths = self.audio_model.audio_tower._get_feat_extract_output_lengths(
+                feature_attention_mask.sum(-1)
+            )
+            batch_size, _, max_mel_seq_len = input_features.shape
+            max_seq_len = (max_mel_seq_len - 2) // 2 + 1
+            # Create a sequence tensor of shape (batch_size, max_seq_len)
+            seq_range = (
+                torch.arange(0, max_seq_len, dtype=audio_feat_lengths.dtype, device=audio_feat_lengths.device)
+                .unsqueeze(0)
+                .expand(batch_size, max_seq_len)
+            )
+            lengths_expand = audio_feat_lengths.unsqueeze(1).expand(batch_size, max_seq_len)
+            # Create mask
+            padding_mask = seq_range >= lengths_expand
+
+            audio_attention_mask_ = padding_mask.view(batch_size, 1, 1, max_seq_len).expand(
+                batch_size, 1, max_seq_len, max_seq_len
+            )
+            audio_attention_mask = audio_attention_mask_.to(
+                dtype=self.audio_model.audio_tower.conv1.weight.dtype, device=self.audio_model.audio_tower.conv1.weight.device
+            )
+            audio_attention_mask[audio_attention_mask_] = float("-inf")
+
+            audio_outputs = self.audio_model.audio_tower(input_features, attention_mask=audio_attention_mask)
+            selected_audio_feature = audio_outputs.last_hidden_state
+            audio_features = self.audio_model.multi_modal_projector(selected_audio_feature)
+
+            num_audios, max_audio_tokens, embed_dim = audio_features.shape
+            audio_features_mask = torch.arange(max_audio_tokens, device=audio_output_lengths.device)[None, :]
+            audio_features_mask = audio_features_mask < audio_output_lengths[:, None]
+            audio_features = audio_features[audio_features_mask]
+
+            return audio_features
 
     def cleanup(self):
         pass
@@ -99,78 +151,115 @@ class VllmEncodeWorker:
         # 8. Yield the encode response.
 
         try:
-            image = await self.image_loader.load_image(request.image_url)
+            request.audio_url = request.image_url
+            request.image_url = None
+            if request.image_url:
+                image = await self.image_loader.load_image(request.image_url)
+                logger.debug(f"Processing image for request: {{ id: {request_id} }}")
+                image_embeds = self.image_processor(images=image, return_tensors="pt")
+                # [gluo NOTE] The commented section is for VLM generalization support,
+                # will use more generic approach once utils/model.py is fixed,
+                # see utils/models.py for details.
+                # # Add a batch dimension to everything
+                # for item in image_embeds:
+                #     image_embeds[item] = image_embeds[item].unsqueeze(0).to(DEVICE)
+                # logger.debug(f"Image embeds: {image_embeds}")
 
-            logger.debug(f"Processing image for request: {{ id: {request_id} }}")
-            image_embeds = self.image_processor(images=image, return_tensors="pt")
-            # [gluo NOTE] The commented section is for VLM generalization support,
-            # will use more generic approach once utils/model.py is fixed,
-            # see utils/models.py for details.
-            # # Add a batch dimension to everything
-            # for item in image_embeds:
-            #     image_embeds[item] = image_embeds[item].unsqueeze(0).to(DEVICE)
-            # logger.debug(f"Image embeds: {image_embeds}")
+                # image_grid_thw = (
+                #     image_embeds["image_grid_thw"].tolist()
+                #     if "image_grid_thw" in image_embeds
+                #     else None
+                # )
+                # image_sizes = (
+                #     image_embeds["image_sizes"].tolist()
+                #     if "image_sizes" in image_embeds
+                #     else [image.size]
+                # )
+                # logger.debug(
+                #     f"Pixel values stats: mean={image_embeds['pixel_values'].mean().item()}, std={image_embeds['pixel_values'].std().item()}, min={image_embeds['pixel_values'].min().item()}, max={image_embeds['pixel_values'].max().item()}"
+                # )
 
-            # image_grid_thw = (
-            #     image_embeds["image_grid_thw"].tolist()
-            #     if "image_grid_thw" in image_embeds
-            #     else None
-            # )
-            # image_sizes = (
-            #     image_embeds["image_sizes"].tolist()
-            #     if "image_sizes" in image_embeds
-            #     else [image.size]
-            # )
-            # logger.debug(
-            #     f"Pixel values stats: mean={image_embeds['pixel_values'].mean().item()}, std={image_embeds['pixel_values'].std().item()}, min={image_embeds['pixel_values'].min().item()}, max={image_embeds['pixel_values'].max().item()}"
-            # )
+                # with torch.no_grad():
+                #     embeddings = self.vision_model.get_multimodal_embeddings(**image_embeds)
+                #     if isinstance(embeddings, tuple) or isinstance(embeddings, list):
+                #         # The result multimodal_embeddings may be a list or tuple of tensors, with each
+                #         # tensor corresponding to a multimodal data item (image or video).
+                #         # TODO: for multi-image support, this result will contain multiple tensors.
+                #         embeddings = embeddings[0].unsqueeze(0)
+                #     logger.debug(
+                #         f"Embeddings: {{ shape: {embeddings.shape}, dtype: {embeddings.dtype}, device: {embeddings.device}, ptr: {embeddings.data_ptr()}, elements: {{ count: {embeddings.numel()}, size: {embeddings.element_size()} }} }}."
+                #     )
 
-            # with torch.no_grad():
-            #     embeddings = self.vision_model.get_multimodal_embeddings(**image_embeds)
-            #     if isinstance(embeddings, tuple) or isinstance(embeddings, list):
-            #         # The result multimodal_embeddings may be a list or tuple of tensors, with each
-            #         # tensor corresponding to a multimodal data item (image or video).
-            #         # TODO: for multi-image support, this result will contain multiple tensors.
-            #         embeddings = embeddings[0].unsqueeze(0)
-            #     logger.debug(
-            #         f"Embeddings: {{ shape: {embeddings.shape}, dtype: {embeddings.dtype}, device: {embeddings.device}, ptr: {embeddings.data_ptr()}, elements: {{ count: {embeddings.numel()}, size: {embeddings.element_size()} }} }}."
-            #     )
+                with torch.no_grad():
+                    logger.debug(f"Vision model device: {self.vision_model.device}")
+                    vision_outputs = self.vision_model.vision_tower(
+                        image_embeds["pixel_values"].to(self.vision_model.device)
+                    )
+                    logger.debug("Vision model completed.")
 
-            with torch.no_grad():
-                logger.debug(f"Vision model device: {self.vision_model.device}")
-                vision_outputs = self.vision_model.vision_tower(
-                    image_embeds["pixel_values"].to(self.vision_model.device)
-                )
-                logger.debug("Vision model completed.")
+                    embeddings = vision_outputs.last_hidden_state
+                    embeddings = self.vision_model.multi_modal_projector(embeddings)
 
-                embeddings = vision_outputs.last_hidden_state
-                embeddings = self.vision_model.multi_modal_projector(embeddings)
+                descriptor = connect.Descriptor(embeddings)
+                with self._connector.create_readable(descriptor) as readable:
+                    request.serialized_request_image = readable.to_serialized()
+                    # Clear the image URL as hint that the image is passed as embeddings.
+                    # request.image_url = None
+                    logger.debug(f"Request: {request.model_dump_json()}")
 
-            descriptor = connect.Descriptor(embeddings)
+                    # Get the response generator
+                    response_generator = await self.pd_worker_client.round_robin(
+                        request.model_dump_json()
+                    )
 
-            with self._connector.create_readable(descriptor) as readable:
-                request.serialized_request = readable.to_serialized()
-                # Clear the image URL as hint that the image is passed as embeddings.
-                request.image_url = None
+                    await readable.wait_for_completion()
 
-                logger.debug(f"Request: {request.model_dump_json()}")
+                    async for response in response_generator:
+                        output = MyRequestOutput.model_validate_json(response.data())
+                        yield MyRequestOutput(
+                            request_id=output.request_id,
+                            prompt=output.prompt,
+                            prompt_token_ids=output.prompt_token_ids,
+                            prompt_logprobs=output.prompt_logprobs,
+                            outputs=output.outputs,
+                            finished=output.finished,
+                        ).model_dump_json()
 
-                # Get the response generator
-                response_generator = await self.pd_worker_client.round_robin(
-                    request.model_dump_json()
-                )
-                await readable.wait_for_completion()
 
-                async for response in response_generator:
-                    output = MyRequestOutput.model_validate_json(response.data())
-                    yield MyRequestOutput(
-                        request_id=output.request_id,
-                        prompt=output.prompt,
-                        prompt_token_ids=output.prompt_token_ids,
-                        prompt_logprobs=output.prompt_logprobs,
-                        outputs=output.outputs,
-                        finished=output.finished,
-                    ).model_dump_json()
+            if request.audio_url:
+                audio, sr = await self.audio_loader.load_audio(request.audio_url)
+                # assert sr == 16000, "Audio sampling rate must be 16000"
+                print(f"sr: {sr}")
+                logger.debug(f"Processing audio for request: {{ id: {request_id} }}")
+                audio_features = self.audio_processor(text="test<|AUDIO|>", audio=audio, return_tensors="pt", padding=False)
+                with torch.no_grad():
+                    audio_embeddings = self.get_audio_embeddings(audio_features)
+                    print(f"audio_embeddings: {audio_embeddings.shape}, {audio_embeddings.dtype}, {audio_embeddings}")
+                descriptor = connect.Descriptor(audio_embeddings)
+                with self._connector.create_readable(descriptor) as readable:
+                    request.serialized_request_audio = readable.to_serialized()
+                    # Clear the audio URL as hint that the audio is passed as embeddings.
+                    # request.audio_url = None
+                    request.audio_embeddings_shape = audio_embeddings.shape
+                    logger.debug(f"Request: {request.model_dump_json()}")
+
+                    response_generator = await self.pd_worker_client.round_robin(
+                        request.model_dump_json()
+                    )
+
+                    await readable.wait_for_completion()
+
+                    async for response in response_generator:
+                        output = MyRequestOutput.model_validate_json(response.data())
+                        yield MyRequestOutput(
+                            request_id=output.request_id,
+                            prompt=output.prompt,
+                            prompt_token_ids=output.prompt_token_ids,
+                            prompt_logprobs=output.prompt_logprobs,
+                            outputs=output.outputs,
+                            finished=output.finished,
+                        ).model_dump_json()
+
 
         except Exception as e:
             logger.error(f"Error processing request {request_id}: {e}")

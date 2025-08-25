@@ -22,7 +22,7 @@ import signal
 import sys
 import uuid
 from enum import Enum
-from typing import AsyncIterator, Tuple, Union
+from typing import AsyncIterator, Optional, Tuple, Union
 
 import uvloop
 from transformers import AutoTokenizer
@@ -140,7 +140,8 @@ class Processor(ProcessMixIn):
     async def _generate(
         self,
         raw_request: Union[CompletionRequest, ChatCompletionRequest],
-        image: str,
+        image,
+        audio,
         request_type: RequestType,
     ):
         request_id = str(uuid.uuid4().hex)
@@ -158,6 +159,7 @@ class Processor(ProcessMixIn):
             sampling_params=sampling_params,
             request_id=request_id,
             image_url=image,
+            audio_url=audio,
         )
 
         # model_dump_json() serializes the request to JSON string
@@ -239,16 +241,18 @@ class Processor(ProcessMixIn):
             temperature=raw_request.temperature,
             request_id=str(uuid.uuid4()),
         )
-        image_url = None
+        image_url, audio_url = None, None
 
         for message in raw_request.messages:
             for item in message.content:
                 if item.type == "image_url":
                     image_url = item.image_url.url
-        if image_url is None:
-            raise ValueError("Image URL is required")
+                elif item.type == "audio_url":
+                    audio_url = item.audio_url.url
+        if image_url is None and audio_url is None:
+            raise ValueError("Image or audio URL is required")
 
-        async for response in self._generate(chat_request, image_url, RequestType.CHAT):
+        async for response in self._generate(chat_request, image_url, audio_url, RequestType.CHAT):
             logger.debug(
                 f"Generated response type {type(response)}, content: {response}"
             )

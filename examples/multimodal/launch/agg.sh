@@ -45,6 +45,8 @@ elif [[ "$MODEL_NAME" == "microsoft/Phi-3.5-vision-instruct" ]]; then
     PROMPT_TEMPLATE="<|user|>\n<|image_1|>\n<prompt><|end|>\n<|assistant|>\n"
 elif [[ "$MODEL_NAME" == "Qwen/Qwen2.5-VL-7B-Instruct" ]]; then
     PROMPT_TEMPLATE="<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><prompt><|im_end|>\n<|im_start|>assistant\n"
+elif [[ "$MODEL_NAME" == "Qwen/Qwen2-Audio-7B-Instruct" ]]; then
+    PROMPT_TEMPLATE="<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nAudio 1: <|audio_bos|><|AUDIO|><|audio_eos|>\n<prompt><|im_end|>\n<|im_start|>assistant\n"
 else
     echo "No multi-modal prompt template is defined for the model: $MODEL_NAME"
     echo "Please provide a prompt template using --prompt-template option."
@@ -53,7 +55,7 @@ else
 fi
 
 # run ingress
-python -m dynamo.frontend &
+python -m dynamo.frontend --http-port 8000 &
 
 # run processor
 python3 components/processor.py --model $MODEL_NAME --prompt-template "$PROMPT_TEMPLATE" &
