@@ -203,7 +203,7 @@ class VllmDecodeWorker(VllmBaseWorker):
                 request = vLLMMultimodalRequest.model_validate_json(request)
             else:
                 request = vLLMMultimodalRequest.model_validate(request)
-        logger.debug(f"Received decode request: { id: {request.request_id} }.")
+        logger.debug(f"Received decode request: {{ id: {request.request_id} }}.")
 
         # Decode worker doesn't process embeddings, so we pass None or empty tensor
         gen = self.engine_client.generate(
@@ -259,9 +259,6 @@ class VllmPDWorker(VllmBaseWorker):
         await self._connector.initialize()
 
         self.image_loader = ImageLoader()
-        # self.image_processor = AutoImageProcessor.from_pretrained(
-        #     self.engine_args.model, trust_remote_code=True
-        # )
 
         logger.info("VllmPDWorker has been initialized")
 
@@ -272,12 +269,13 @@ class VllmPDWorker(VllmBaseWorker):
                 request = vLLMMultimodalRequest.model_validate_json(request)
             else:
                 request = vLLMMultimodalRequest.model_validate(request)
-        logger.debug(f"Received PD request: { id: {request.request_id} }.")
+        logger.debug(f"Received PD request: {{ id: {request.request_id} }}.")
 
-        if request.image_url:
-            assert not request.audio_url, "Image and audio cannot be provided together for now"
-            # Process embeddings using the connector
-            embeddings, descriptor = self._embeddings_descriptor
+        embeddings, descriptor = None, None
+        # if request.image_url:
+        #     assert not request.audio_url, "Image and audio cannot be provided together for now"
+        #     # Process embeddings using the connector
+        #     embeddings, descriptor = self._embeddings_descriptor
 
         # Process embeddings using the connector
         # Create a descriptor based on the embedding shape.
@@ -291,6 +289,7 @@ class VllmPDWorker(VllmBaseWorker):
         if (
             request.multimodal_input.image_url is None
             and request.multimodal_input.video_url is None
+            and request.multimodal_input.audio_url is None
         ):
             if descriptor is None:
                 raise RuntimeError(
@@ -298,7 +297,7 @@ class VllmPDWorker(VllmBaseWorker):
                 )
 
             read_op = await self._connector.begin_read(
-                request.serialized_request_image, descriptor
+                request.serialized_request, descriptor
             )
             await read_op.wait_for_completion()
             if "video" in self.engine_args.model.lower():
@@ -308,6 +307,13 @@ class VllmPDWorker(VllmBaseWorker):
                     self.EMBEDDINGS_DTYPE,
                     video_numpy=video_numpy,
                 )
+            elif "audio" in self.engine_args.model.lower():
+                multi_modal_data = construct_mm_data(
+                    self.engine_args.model,
+                    self.EMBEDDINGS_DTYPE,
+                    audio_embeds=embeddings,
+                )
+                print(f"multi_modal_data: {multi_modal_data} =================")
             else:
                 multi_modal_data = construct_mm_data(
                     self.engine_args.model,
@@ -315,29 +321,6 @@ class VllmPDWorker(VllmBaseWorker):
                     image_embeds=embeddings,
                     image_grid_thw=request.image_grid_thw,
                 )
-        elif request.audio_url:
-            audio_embeddings_shape = request.audio_embeddings_shape
-            EMBEDDINGS_DTYPE = torch.float16
-            EMBEDDINGS_DEVICE = "cpu"
-            embeddings = torch.empty(
-                audio_embeddings_shape, dtype=EMBEDDINGS_DTYPE, device=EMBEDDINGS_DEVICE
-            )
-            print(f"audio_embeddings_shape: {audio_embeddings_shape}, before read: {embeddings}")
-
-            descriptor = connect.Descriptor(embeddings)
-            if descriptor is None:
-                raise RuntimeError(
-                    "Descriptor is None in PD worker - cannot process embeddings"
-                )
-            read_op = await self._connector.begin_read(
-                request.serialized_request_audio, descriptor
-            )
-            await read_op.wait_for_completion()
-            logger.debug(f"in PD worker, audio features: {embeddings}")
-            print(f"in PD worker, audio features: {embeddings}, {embeddings.shape}, {embeddings.dtype}")
-            embeddings = embeddings.to(torch.bfloat16)
-            print(f"in PD worker bf16, audio features: {embeddings}, {embeddings.shape}, {embeddings.dtype}")
-            multi_modal_data = {"audio_embeds": [embeddings]}
         else:
             # Use PIL image instead of image embeddings
             multi_modal_data = {
@@ -349,9 +332,8 @@ class VllmPDWorker(VllmBaseWorker):
         # Remove the image features from the request as they are not required
         request.multimodal_input.image_url = None
         request.multimodal_input.video_url = None
+        request.multimodal_input.audio_url = None
         request.serialized_request = None
-        request.serialized_request_image = None
-        request.serialized_request_audio = None
 
         pd_request = copy.deepcopy(request)
         # Do prefill and remote decode if enable_disagg is true
@@ -366,11 +348,11 @@ class VllmPDWorker(VllmBaseWorker):
 
             logger.debug("Prefill request: %s", pd_request)
             print("Prefill request: %s", pd_request)
-        # {"image" : multi_modal_data} if request.image_url else {"audio" : multi_modal_data}
+
         gen = self.engine_client.generate(
             prompt=TokensPrompt(
                 prompt_token_ids=pd_request.engine_prompt["prompt_token_ids"],
-                multi_modal_data={"audio" : multi_modal_data}
+                multi_modal_data=multi_modal_data,
             ),
             sampling_params=pd_request.sampling_params,
             request_id=pd_request.request_id,

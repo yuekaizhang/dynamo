@@ -20,9 +20,9 @@ import os
 import signal
 import sys
 from typing import AsyncIterator, Tuple
-
+import torch
 import uvloop
-from transformers import AutoImageProcessor
+from transformers import AutoProcessor, Qwen2AudioForConditionalGeneration
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.utils import FlexibleArgumentParser
 
@@ -32,9 +32,7 @@ from dynamo.runtime.logging import configure_dynamo_logging
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from utils.args import Config, base_parse_args, parse_endpoint
-from utils.encode_utils import encode_image_embeddings, get_encoder_components
-from utils.image_loader import ImageLoader
-from utils.model import load_vision_model
+from utils.audio_loader import AudioLoader
 from utils.protocol import MyRequestOutput, vLLMMultimodalRequest
 
 configure_dynamo_logging()
@@ -67,17 +65,50 @@ class VllmEncodeWorker:
         self.engine_args = engine_args
         self.model = self.engine_args.model
 
-        self.image_loader = ImageLoader(cache_size=CACHE_SIZE_MAXIMUM)
-        self.image_processor = AutoImageProcessor.from_pretrained(
+        self.audio_loader = AudioLoader(cache_size=CACHE_SIZE_MAXIMUM)
+        self.audio_processor = AutoProcessor.from_pretrained(
             self.model, trust_remote_code=True
         )
-        self.vision_model = load_vision_model(self.model)
-        self.min_workers = 1
+        self.audio_model = Qwen2AudioForConditionalGeneration.from_pretrained(
+            self.model, device_map="auto", torch_dtype=torch.float16
+        ).eval()
 
-        # Get encoder components for the model
-        self.vision_encoder, self.projector = get_encoder_components(
-            self.model, self.vision_model
-        )
+    def get_audio_embeddings(self, audio_features):
+        input_features, feature_attention_mask = audio_features.input_features, audio_features.feature_attention_mask
+        with torch.no_grad():
+            audio_feat_lengths, audio_output_lengths = self.audio_model.audio_tower._get_feat_extract_output_lengths(
+                feature_attention_mask.sum(-1)
+            )
+            batch_size, _, max_mel_seq_len = input_features.shape
+            max_seq_len = (max_mel_seq_len - 2) // 2 + 1
+            # Create a sequence tensor of shape (batch_size, max_seq_len)
+            seq_range = (
+                torch.arange(0, max_seq_len, dtype=audio_feat_lengths.dtype, device=audio_feat_lengths.device)
+                .unsqueeze(0)
+                .expand(batch_size, max_seq_len)
+            )
+            lengths_expand = audio_feat_lengths.unsqueeze(1).expand(batch_size, max_seq_len)
+            # Create mask
+            padding_mask = seq_range >= lengths_expand
+
+            audio_attention_mask_ = padding_mask.view(batch_size, 1, 1, max_seq_len).expand(
+                batch_size, 1, max_seq_len, max_seq_len
+            )
+            audio_attention_mask = audio_attention_mask_.to(
+                dtype=self.audio_model.audio_tower.conv1.weight.dtype, device=self.audio_model.audio_tower.conv1.weight.device
+            )
+            audio_attention_mask[audio_attention_mask_] = float("-inf")
+
+            audio_outputs = self.audio_model.audio_tower(input_features, attention_mask=audio_attention_mask)
+            selected_audio_feature = audio_outputs.last_hidden_state
+            audio_features = self.audio_model.multi_modal_projector(selected_audio_feature)
+
+            num_audios, max_audio_tokens, embed_dim = audio_features.shape
+            audio_features_mask = torch.arange(max_audio_tokens, device=audio_output_lengths.device)[None, :]
+            audio_features_mask = audio_features_mask < audio_output_lengths[:, None]
+            audio_features = audio_features[audio_features_mask]
+
+            return audio_features
 
     def cleanup(self):
         pass
@@ -106,48 +137,30 @@ class VllmEncodeWorker:
         # 8. Yield the encode response.
 
         try:
-            if not request.multimodal_input.image_url:
-                raise ValueError("image_url is required for the encode worker.")
+            # FIXME: the current API does not support audio, so we need to use the image URL as a placeholder
+            request.multimodal_input.audio_url = request.multimodal_input.image_url
+            request.multimodal_input.image_url = None
+            
+            audio, sr = await self.audio_loader.load_audio(request.multimodal_input.audio_url)
+            # assert sr == 16000, "Audio sampling rate must be 16000"
+            print(f"sr: {sr}")
 
-            image = await self.image_loader.load_image(
-                request.multimodal_input.image_url
-            )
-
-            logger.debug(f"Processing image for request: {{ id: {request_id} }}")
-            image_embeds = self.image_processor(images=image, return_tensors="pt")
-
-            # Encode the image embeddings using model-specific encoder
-            embeddings = encode_image_embeddings(
-                model_name=self.model,
-                image_embeds=image_embeds,
-                vision_encoder=self.vision_encoder,
-                projector=self.projector,
-            )
-
-            image_grid_thw = (
-                image_embeds["image_grid_thw"].tolist()
-                if "image_grid_thw" in image_embeds
-                else None
-            )
-            logger.debug(
-                f"Pixel values stats: mean={image_embeds['pixel_values'].mean().item()}, std={image_embeds['pixel_values'].std().item()}, min={image_embeds['pixel_values'].min().item()}, max={image_embeds['pixel_values'].max().item()}"
-            )
-
-            request.image_grid_thw = image_grid_thw
-            request.embeddings_shape = tuple(embeddings.shape)
-            descriptor = connect.Descriptor(embeddings)
-
+            audio_features = self.audio_processor(text="test<|AUDIO|>", audio=audio, return_tensors="pt", padding=False)
+            with torch.no_grad():
+                audio_embeddings = self.get_audio_embeddings(audio_features)
+                print(f"audio_embeddings: {audio_embeddings.shape}, {audio_embeddings.dtype}, {audio_embeddings}")
+            descriptor = connect.Descriptor(audio_embeddings)
             with self._connector.create_readable(descriptor) as readable:
                 request.serialized_request = readable.metadata()
-                # Clear the image URL as hint that the image is passed as embeddings.
-                request.multimodal_input.image_url = None
-
+                # Clear the audio URL as hint that the audio is passed as embeddings.
+                request.multimodal_input.audio_url = None
+                request.embeddings_shape = tuple(audio_embeddings.shape)
                 logger.debug(f"Request: {request.model_dump_json()}")
 
-                # Get the response generator
                 response_generator = await self.pd_worker_client.round_robin(
                     request.model_dump_json()
                 )
+
                 await readable.wait_for_completion()
 
                 async for response in response_generator:
@@ -160,6 +173,7 @@ class VllmEncodeWorker:
                         outputs=output.outputs,
                         finished=output.finished,
                     ).model_dump_json()
+
 
         except Exception as e:
             logger.error(f"Error processing request {request_id}: {e}")

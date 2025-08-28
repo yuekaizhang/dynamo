@@ -137,8 +137,7 @@ class Processor(ProcessMixIn):
     async def _generate(
         self,
         raw_request: Union[CompletionRequest, ChatCompletionRequest],
-        image,
-        audio,
+        multimodal_input: MultiModalInput,
         request_type: RequestType,
     ):
         request_id = str(uuid.uuid4().hex)
@@ -155,8 +154,7 @@ class Processor(ProcessMixIn):
             engine_prompt=engine_prompt,
             sampling_params=sampling_params,
             request_id=request_id,
-            image_url=image,
-            audio_url=audio,
+            multimodal_input=multimodal_input,
         )
 
         # model_dump_json() serializes the request to JSON string
@@ -238,18 +236,27 @@ class Processor(ProcessMixIn):
             temperature=raw_request.temperature,
             request_id=str(uuid.uuid4()),
         )
-        image_url, audio_url = None, None
+        multimodal_input = MultiModalInput()
 
         for message in raw_request.messages:
             for item in message.content:
                 if item.type == "image_url":
-                    image_url = item.image_url.url
+                    multimodal_input.image_url = item.image_url.url
+                elif item.type == "video_url":
+                    if multimodal_input.image_url is not None:
+                        raise ValueError("Cannot provide both image and video URLs")
+                    multimodal_input.video_url = item.video_url.url
                 elif item.type == "audio_url":
-                    audio_url = item.audio_url.url
-        if image_url is None and audio_url is None:
-            raise ValueError("Image or audio URL is required")
+                    if multimodal_input.image_url is not None or multimodal_input.video_url is not None:
+                        raise ValueError("Cannot provide both image and video URLs")
+                    multimodal_input.audio_url = item.audio_url.url
 
-        async for response in self._generate(chat_request, image_url, audio_url, RequestType.CHAT):
+        if multimodal_input.image_url is None and multimodal_input.video_url is None and multimodal_input.audio_url is None:
+            raise ValueError("Either image URL or video URL or audio URL is required")
+
+        async for response in self._generate(
+            chat_request, multimodal_input, RequestType.CHAT
+        ):
             logger.debug(
                 f"Generated response type {type(response)}, content: {response}"
             )

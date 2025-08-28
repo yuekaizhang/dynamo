@@ -142,36 +142,15 @@ class MultiModalRequest(BaseModel):
 class MultiModalInput(BaseModel):
     image_url: Optional[str] = None
     video_url: Optional[str] = None
+    audio_url: Optional[str] = None
 
 
 class vLLMMultimodalRequest(vLLMGenerateRequest):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    image_url: Optional[str] = None
-    audio_url: Optional[str] = None
-    # image_features: Optional[List[List[List[float]]]] = None # Remove once have NIXL support
-    # serialized_request: Optional[connect.SerializedRequest] = None
-    serialized_request_image: Optional[connect.SerializedRequest] = None
-    serialized_request_audio: Optional[connect.SerializedRequest] = None
-    audio_embeddings_shape: Optional[List[int]] = None
-
-class EncodeRequest(BaseModel):
-    """
-    Serializable class of all the fields vLLM engine requires for inference
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    image_url: Optional[str] = None
-    audio_url: Optional[str] = None
-    request_id: str
-    serialized_request: Optional[connect.SerializedRequest] = None
-
-
-class EncodeResponse(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    request_id: str
+    multimodal_input: Optional[MultiModalInput] = Field(default_factory=MultiModalInput)
     image_grid_thw: Optional[List[Any]] = None
     embeddings_shape: Optional[
-        Union[Tuple[int, int, int], Tuple[int, int, int, int]]
+        Union[Tuple[int, int, int], Tuple[int, int, int, int], Tuple[int, int]]
     ] = None
     serialized_request: Optional[connect.RdmaMetadata] = None
 
