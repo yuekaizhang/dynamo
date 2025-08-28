@@ -22,7 +22,7 @@ import signal
 import sys
 import uuid
 from enum import Enum
-from typing import AsyncIterator, Optional, Tuple, Union
+from typing import AsyncIterator, Tuple, Union
 
 import uvloop
 from transformers import AutoTokenizer
