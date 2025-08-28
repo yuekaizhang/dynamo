@@ -272,10 +272,6 @@ class VllmPDWorker(VllmBaseWorker):
         logger.debug(f"Received PD request: {{ id: {request.request_id} }}.")
 
         embeddings, descriptor = None, None
-        # if request.image_url:
-        #     assert not request.audio_url, "Image and audio cannot be provided together for now"
-        #     # Process embeddings using the connector
-        #     embeddings, descriptor = self._embeddings_descriptor
 
         # Process embeddings using the connector
         # Create a descriptor based on the embedding shape.
@@ -313,7 +309,6 @@ class VllmPDWorker(VllmBaseWorker):
                     self.EMBEDDINGS_DTYPE,
                     audio_embeds=embeddings,
                 )
-                print(f"multi_modal_data: {multi_modal_data} =================")
             else:
                 multi_modal_data = construct_mm_data(
                     self.engine_args.model,
@@ -347,7 +342,6 @@ class VllmPDWorker(VllmBaseWorker):
             pd_request.sampling_params.min_tokens = 1
 
             logger.debug("Prefill request: %s", pd_request)
-            print("Prefill request: %s", pd_request)
 
         gen = self.engine_client.generate(
             prompt=TokensPrompt(
@@ -397,7 +391,6 @@ class VllmPDWorker(VllmBaseWorker):
                 logger.debug(
                     f"Response kv_transfer_params: {response.kv_transfer_params}"
                 )
-                print(f"in PD worker, response: {response}")
                 yield MyRequestOutput(
                     request_id=response.request_id,
                     prompt=response.prompt,
